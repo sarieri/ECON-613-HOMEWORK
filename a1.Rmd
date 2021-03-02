@@ -1,0 +1,629 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+  code_folding: "hide"
+---
+```{r include = FALSE}
+knitr::opts_chunk$set(echo=FALSE, results="hide")
+setwd("D:/ECON613/A1")
+rm(list = ls())
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(data.table)
+library(xtable)
+datstu=read.csv('datstu.csv')
+datsss=read.csv('datsss.csv')
+datjss=read.csv('datjss.csv')
+```
+
+# Exercise 1
+
+```{r echo=TRUE, results="show"}
+#Exercise 1 Missing Data----
+##Number of Students----
+length(datstu$X)
+##Number of Schools----
+length(na.omit(unique(datsss$schoolcode)))
+length(na.omit(unique(unlist(datstu[5:10]))))
+##Number of Programs----
+length(unique(na.omit(unlist(datstu[11:16]))))
+##Number of Choices----
+datstu=datstu %>% mutate(choice1=paste(schoolcode1, choicepgm1, sep=" "),
+                         choice2=paste(schoolcode2, choicepgm2, sep=" "),
+                         choice3=paste(schoolcode3, choicepgm3, sep=" "),
+                         choice4=paste(schoolcode4, choicepgm4, sep=" "),
+                         choice5=paste(schoolcode5, choicepgm5, sep=" "),
+                         choice6=paste(schoolcode6, choicepgm6, sep=" "))
+dat=select(datstu, choice1, choice2, choice3, choice4, choice5, choice6)
+dat_long=gather(dat, 'key', 'value')
+dat_long <- subset(dat_long, value!= "NA ")
+length(unique(na.omit(dat_long$value)))
+##Number of Missing Test Scores----
+sum(is.na(datstu$score))
+##Number of Same School, Different Programs----
+for (i in 1:nrow(datstu)){
+datstu$sameschool[i]=length(unique(na.omit(unlist(datstu[i,5:10]))))
+}
+sum(datstu$sameschool<6-rowSums(is.na(datstu[5:10])))
+#sum=result$`combine$dat2.program`
+##Apply to less than 6 choices----
+length(which(rowSums(dat=="NA ")!=0))
+
+```
+| Number of students: 340823
+| Number of schools(Junior High): 898
+| Number of schools(Senior HIgh that students apply): 640
+| Number of programs: 33
+| Number of choices (school,program): 3085
+| Missing test score: 179887
+| Apply to the same school (different programs): 120071
+| Apply to less than 6 choices: 17720
+| #Note here some of the results may be different due to different manipulations on NA values in original dataset 
+
+
+# Exercise 2
+
+```{r echo=TRUE, results="show"}
+#Exercise 2 Data----
+datstu$admitted_schoolcode=ifelse(datstu$rankplace==1, datstu$schoolcode1,
+                       ifelse(datstu$rankplace==2, datstu$schoolcode2,
+                              ifelse(datstu$rankplace==3, datstu$schoolcode3,
+                                     ifelse(datstu$rankplace==4, datstu$schoolcode4,
+                                            ifelse(datstu$rankplace==5, datstu$schoolcode5,
+                                                   ifelse(datstu$rankplace==6, datstu$schoolcode6, NA))))))
+datstu$admitted=ifelse(datstu$rankplace==1, datstu$choice1,
+                       ifelse(datstu$rankplace==2, datstu$choice2,
+                              ifelse(datstu$rankplace==3, datstu$choice3,
+                                     ifelse(datstu$rankplace==4, datstu$choice4,
+                                            ifelse(datstu$rankplace==5, datstu$choice5,
+                                                   ifelse(datstu$rankplace==6, datstu$choice6, NA))))))
+dataset=datstu %>% group_by(admitted) %>% summarise(schoolcode=admitted_schoolcode, minscore=min(score), average=mean(score), number=n(), .groups = 'drop')
+dataset=dataset %>% 
+  rename(
+    school_program = admitted
+  )
+dataset=unique(dataset)
+datsss$X=NULL
+datsss=unique(datsss)
+datafinal<-merge(x=dataset,y=datsss,by="schoolcode",all.x=TRUE)
+datafinal=na.omit(datafinal)
+#Another way to left join
+datatest=left_join(dataset, datsss, by="schoolcode")
+datatest=na.omit(datatest)
+datatest_final=select(datatest, school_program, sssdistrict, ssslat, ssslong, minscore, average, number)
+datatest_final=datatest_final %>% 
+  rename(
+    district=sssdistrict,
+    latitude=ssslat,
+    longitude=ssslong,
+    cutoff=minscore,
+    quality=average,
+    size=number
+  )
+head(datatest_final, 20)
+```
+
+# Exercise 3
+
+```{r echo=TRUE, results="show"}
+#Exercise 3 Distance----
+datjss=select(datjss, -X)
+datstujss=left_join(datstu, datjss, by="jssdistrict")
+dat_school=select(datstu, X, choice1:choice6)
+dat_school=gather(dat_school, 'key', 'value', -X)
+dat_school=left_join(dat_school, datstujss, by=c("X"="X"))
+dat_school=select(dat_school, X, key, value, jssdistrict, point_x, point_y)
+dat_school=cbind(dat_school, colsplit(dat_school$value," ",c("schoolcode","program")))
+
+m=dat_school%>%group_by(X)
+
+datstujsssss=left_join(dat_school, datsss, by=c("schoolcode"="schoolcode"))
+datstujsssss$distance=sqrt(
+  (69.172*(datstujsssss$ssslong-datstujsssss$point_x)*cos(datstujsssss$point_y/57.3))^2+(69.172*(datstujsssss$ssslat-datstujsssss$point_y)^2)
+)
+datstujsssss_omit=datstujsssss[!is.na(datstujsssss$distance),]
+
+datstujsssss_omit=select(datstujsssss_omit, jssdistrict, point_x, point_y, schoolname, sssdistrict, ssslat, ssslong, distance)
+datstujsssss_omit=datstujsssss_omit %>% 
+  rename(
+    jsslat=point_y,
+    jsslong=point_x,
+    sssname=schoolname,
+  )
+
+head(datstujsssss_omit, 20)
+```
+
+# Exercise 4
+```{r echo=TRUE, results="show"}
+#Exercise 4 Descriptive Characteristics----
+datstujsssss=left_join(datstujsssss, dataset, by=c("value"="school_program"))
+score=data.frame(datstu[,1:2])
+datstujsssss=left_join(datstujsssss, score, by=c("X"="X"))
+
+
+#choice1
+rank1=na.omit(datstujsssss[datstujsssss$key=="choice1",])
+sd_cutoff_choice1=sd(rank1$minscore)
+mean_cutoff_choice1=mean(rank1$minscore)
+sd_quality_choice1=sd(rank1$average)
+mean_quality_choice1=mean(rank1$average)
+sd_distance_choice1=sd(rank1$distance)
+mean_distance_choice1=mean(rank1$distance)
+
+#choice2
+rank2=na.omit(datstujsssss[datstujsssss$key=="choice2",])
+sd_cutoff_choice2=sd(rank2$minscore)
+mean_cutoff_choice2=mean(rank2$minscore)
+sd_quality_choice2=sd(rank2$average)
+mean_quality_choice2=mean(rank2$average)
+sd_distance_choice2=sd(rank2$distance)
+mean_distance_choice2=mean(rank2$distance)
+
+#choice3
+rank3=na.omit(datstujsssss[datstujsssss$key=="choice3",])
+sd_cutoff_choice3=sd(rank3$minscore)
+mean_cutoff_choice3=mean(rank3$minscore)
+sd_quality_choice3=sd(rank3$average)
+mean_quality_choice3=mean(rank3$average)
+sd_distance_choice3=sd(rank3$distance)
+mean_distance_choice3=mean(rank3$distance)
+
+#choice4
+rank4=na.omit(datstujsssss[datstujsssss$key=="choice4",])
+sd_cutoff_choice4=sd(rank4$minscore)
+mean_cutoff_choice4=mean(rank4$minscore)
+sd_quality_choice4=sd(rank4$average)
+mean_quality_choice4=mean(rank4$average)
+sd_distance_choice4=sd(rank4$distance)
+mean_distance_choice4=mean(rank4$distance)
+
+#choice5
+rank5=na.omit(datstujsssss[datstujsssss$key=="choice5",])
+sd_cutoff_choice5=sd(rank5$minscore)
+mean_cutoff_choice5=mean(rank5$minscore)
+sd_quality_choice5=sd(rank5$average)
+mean_quality_choice5=mean(rank5$average)
+sd_distance_choice5=sd(rank5$distance)
+mean_distance_choice5=mean(rank5$distance)
+
+#choice6
+rank6=na.omit(datstujsssss[datstujsssss$key=="choice6",])
+sd_cutoff_choice6=sd(rank6$minscore)
+mean_cutoff_choice6=mean(rank6$minscore)
+sd_quality_choice6=sd(rank6$average)
+mean_quality_choice6=mean(rank6$average)
+sd_distance_choice6=sd(rank6$distance)
+mean_distance_choice6=mean(rank6$distance)
+
+mean_sd_table=cbind(c(sd_cutoff_choice1, sd_cutoff_choice2, sd_cutoff_choice3, sd_cutoff_choice4, sd_cutoff_choice5, sd_cutoff_choice6), c(mean_cutoff_choice1, mean_cutoff_choice2, mean_cutoff_choice3, mean_cutoff_choice4, mean_cutoff_choice5, mean_cutoff_choice6), c(sd_quality_choice1, sd_quality_choice2, sd_quality_choice3, sd_quality_choice4, sd_quality_choice5, sd_quality_choice6), c(mean_quality_choice1, mean_quality_choice2, mean_quality_choice3, mean_quality_choice4, mean_quality_choice5, mean_quality_choice6), c(sd_distance_choice1, sd_distance_choice2, sd_distance_choice3, sd_distance_choice4, sd_distance_choice5, sd_distance_choice6), c(mean_distance_choice1, mean_distance_choice2, mean_distance_choice3, mean_distance_choice4, mean_distance_choice5, mean_distance_choice6))
+
+colnames(mean_sd_table) = c("sd_cutoff", "mean_cutoff","sd_quality","mean_quality", "sd_distance", "mean_distance")
+rownames(mean_sd_table) = c("choice1", "choice2","choice3","choice4", "choice5", "choice6")
+
+
+
+
+#datstu_omit=datstu[!is.na(datstu$score),]
+
+#choice1_quantile
+rank1_q <- rank1 %>% 
+  mutate(group = cut(score, c(quantile(score)),
+                     labels = 1:4, include.lowest=T))
+rank1_q1=rank1_q[rank1_q$group==1, ]
+rank1_q2=rank1_q[rank1_q$group==2, ]
+rank1_q3=rank1_q[rank1_q$group==3, ]
+rank1_q4=rank1_q[rank1_q$group==4, ]
+
+sd_cutoff_r1q1=sd(rank1_q1$minscore)
+mean_cutoff_r1q1=mean(rank1_q1$minscore)
+sd_cutoff_r1q2=sd(rank1_q2$minscore)
+mean_cutoff_r1q2=mean(rank1_q2$minscore)
+sd_cutoff_r1q3=sd(rank1_q3$minscore)
+mean_cutoff_r1q3=mean(rank1_q3$minscore)
+sd_cutoff_r1q4=sd(rank1_q4$minscore)
+mean_cutoff_r1q4=mean(rank1_q4$minscore)
+
+
+sd_quality_r1q1=sd(rank1_q1$average)
+mean_quality_r1q1=mean(rank1_q1$average)
+sd_quality_r1q2=sd(rank1_q2$average)
+mean_quality_r1q2=mean(rank1_q2$average)
+sd_quality_r1q3=sd(rank1_q3$average)
+mean_quality_r1q3=mean(rank1_q3$average)
+sd_quality_r1q4=sd(rank1_q4$average)
+mean_quality_r1q4=mean(rank1_q4$average)
+
+sd_distance_r1q1=sd(rank1_q1$distance)
+mean_distance_r1q1=mean(rank1_q1$distance)
+sd_distance_r1q2=sd(rank1_q2$distance)
+mean_distance_r1q2=mean(rank1_q2$distance)
+sd_distance_r1q3=sd(rank1_q3$distance)
+mean_distance_r1q3=mean(rank1_q3$distance)
+sd_distance_r1q4=sd(rank1_q4$distance)
+mean_distance_r1q4=mean(rank1_q4$distance)
+
+
+
+#choice2_quantile
+rank2_q <- rank2 %>% 
+  mutate(group = cut(score, c(quantile(score)),
+                     labels = 1:4, include.lowest=T))
+rank2_q1=rank2_q[rank2_q$group==1, ]
+rank2_q2=rank2_q[rank2_q$group==2, ]
+rank2_q3=rank2_q[rank2_q$group==3, ]
+rank2_q4=rank2_q[rank2_q$group==4, ]
+
+sd_cutoff_r2q1=sd(rank2_q1$minscore)
+mean_cutoff_r2q1=mean(rank2_q1$minscore)
+sd_cutoff_r2q2=sd(rank2_q2$minscore)
+mean_cutoff_r2q2=mean(rank2_q2$minscore)
+sd_cutoff_r2q3=sd(rank2_q3$minscore)
+mean_cutoff_r2q3=mean(rank2_q3$minscore)
+sd_cutoff_r2q4=sd(rank2_q4$minscore)
+mean_cutoff_r2q4=mean(rank2_q4$minscore)
+
+
+sd_quality_r2q1=sd(rank2_q1$average)
+mean_quality_r2q1=mean(rank2_q1$average)
+sd_quality_r2q2=sd(rank2_q2$average)
+mean_quality_r2q2=mean(rank2_q2$average)
+sd_quality_r2q3=sd(rank2_q3$average)
+mean_quality_r2q3=mean(rank2_q3$average)
+sd_quality_r2q4=sd(rank2_q4$average)
+mean_quality_r2q4=mean(rank2_q4$average)
+
+sd_distance_r2q1=sd(rank2_q1$distance)
+mean_distance_r2q1=mean(rank2_q1$distance)
+sd_distance_r2q2=sd(rank2_q2$distance)
+mean_distance_r2q2=mean(rank2_q2$distance)
+sd_distance_r2q3=sd(rank2_q3$distance)
+mean_distance_r2q3=mean(rank2_q3$distance)
+sd_distance_r2q4=sd(rank2_q4$distance)
+mean_distance_r2q4=mean(rank2_q4$distance)
+
+#choice3_quantile
+rank3_q <- rank3 %>% 
+  mutate(group = cut(score, c(quantile(score)),
+                     labels = 1:4, include.lowest=T))
+rank3_q1=rank3_q[rank3_q$group==1, ]
+rank3_q2=rank3_q[rank3_q$group==2, ]
+rank3_q3=rank3_q[rank3_q$group==3, ]
+rank3_q4=rank3_q[rank3_q$group==4, ]
+
+sd_cutoff_r3q1=sd(rank3_q1$minscore)
+mean_cutoff_r3q1=mean(rank3_q1$minscore)
+sd_cutoff_r3q2=sd(rank3_q2$minscore)
+mean_cutoff_r3q2=mean(rank3_q2$minscore)
+sd_cutoff_r3q3=sd(rank3_q3$minscore)
+mean_cutoff_r3q3=mean(rank3_q3$minscore)
+sd_cutoff_r3q4=sd(rank3_q4$minscore)
+mean_cutoff_r3q4=mean(rank3_q4$minscore)
+
+
+sd_quality_r3q1=sd(rank3_q1$average)
+mean_quality_r3q1=mean(rank3_q1$average)
+sd_quality_r3q2=sd(rank3_q2$average)
+mean_quality_r3q2=mean(rank3_q2$average)
+sd_quality_r3q3=sd(rank3_q3$average)
+mean_quality_r3q3=mean(rank3_q3$average)
+sd_quality_r3q4=sd(rank3_q4$average)
+mean_quality_r3q4=mean(rank3_q4$average)
+
+sd_distance_r3q1=sd(rank3_q1$distance)
+mean_distance_r3q1=mean(rank3_q1$distance)
+sd_distance_r3q2=sd(rank3_q2$distance)
+mean_distance_r3q2=mean(rank3_q2$distance)
+sd_distance_r3q3=sd(rank3_q3$distance)
+mean_distance_r3q3=mean(rank3_q3$distance)
+sd_distance_r3q4=sd(rank3_q4$distance)
+mean_distance_r3q4=mean(rank3_q4$distance)
+
+#choice4_quantile
+rank4_q <- rank4 %>% 
+  mutate(group = cut(score, c(quantile(score)),
+                     labels = 1:4, include.lowest=T))
+rank4_q1=rank4_q[rank4_q$group==1, ]
+rank4_q2=rank4_q[rank4_q$group==2, ]
+rank4_q3=rank4_q[rank4_q$group==3, ]
+rank4_q4=rank4_q[rank4_q$group==4, ]
+
+sd_cutoff_r4q1=sd(rank4_q1$minscore)
+mean_cutoff_r4q1=mean(rank4_q1$minscore)
+sd_cutoff_r4q2=sd(rank4_q2$minscore)
+mean_cutoff_r4q2=mean(rank4_q2$minscore)
+sd_cutoff_r4q3=sd(rank4_q3$minscore)
+mean_cutoff_r4q3=mean(rank4_q3$minscore)
+sd_cutoff_r4q4=sd(rank4_q4$minscore)
+mean_cutoff_r4q4=mean(rank4_q4$minscore)
+
+
+sd_quality_r4q1=sd(rank4_q1$average)
+mean_quality_r4q1=mean(rank4_q1$average)
+sd_quality_r4q2=sd(rank4_q2$average)
+mean_quality_r4q2=mean(rank4_q2$average)
+sd_quality_r4q3=sd(rank4_q3$average)
+mean_quality_r4q3=mean(rank4_q3$average)
+sd_quality_r4q4=sd(rank4_q4$average)
+mean_quality_r4q4=mean(rank4_q4$average)
+
+sd_distance_r4q1=sd(rank4_q1$distance)
+mean_distance_r4q1=mean(rank4_q1$distance)
+sd_distance_r4q2=sd(rank4_q2$distance)
+mean_distance_r4q2=mean(rank4_q2$distance)
+sd_distance_r4q3=sd(rank4_q3$distance)
+mean_distance_r4q3=mean(rank4_q3$distance)
+sd_distance_r4q4=sd(rank4_q4$distance)
+mean_distance_r4q4=mean(rank4_q4$distance)
+
+#choice5_quantile
+rank5_q <- rank5 %>% 
+  mutate(group = cut(score, c(quantile(score)),
+                     labels = 1:4, include.lowest=T))
+rank5_q1=rank5_q[rank5_q$group==1, ]
+rank5_q2=rank5_q[rank5_q$group==2, ]
+rank5_q3=rank5_q[rank5_q$group==3, ]
+rank5_q4=rank5_q[rank5_q$group==4, ]
+
+sd_cutoff_r5q1=sd(rank5_q1$minscore)
+mean_cutoff_r5q1=mean(rank5_q1$minscore)
+sd_cutoff_r5q2=sd(rank5_q2$minscore)
+mean_cutoff_r5q2=mean(rank5_q2$minscore)
+sd_cutoff_r5q3=sd(rank5_q3$minscore)
+mean_cutoff_r5q3=mean(rank5_q3$minscore)
+sd_cutoff_r5q4=sd(rank5_q4$minscore)
+mean_cutoff_r5q4=mean(rank5_q4$minscore)
+
+
+sd_quality_r5q1=sd(rank5_q1$average)
+mean_quality_r5q1=mean(rank5_q1$average)
+sd_quality_r5q2=sd(rank5_q2$average)
+mean_quality_r5q2=mean(rank5_q2$average)
+sd_quality_r5q3=sd(rank5_q3$average)
+mean_quality_r5q3=mean(rank5_q3$average)
+sd_quality_r5q4=sd(rank5_q4$average)
+mean_quality_r5q4=mean(rank5_q4$average)
+
+sd_distance_r5q1=sd(rank5_q1$distance)
+mean_distance_r5q1=mean(rank5_q1$distance)
+sd_distance_r5q2=sd(rank5_q2$distance)
+mean_distance_r5q2=mean(rank5_q2$distance)
+sd_distance_r5q3=sd(rank5_q3$distance)
+mean_distance_r5q3=mean(rank5_q3$distance)
+sd_distance_r5q4=sd(rank5_q4$distance)
+mean_distance_r5q4=mean(rank5_q4$distance)
+
+#choice6_quantile
+rank6_q <- rank6 %>% 
+  mutate(group = cut(score, c(quantile(score)),
+                     labels = 1:4, include.lowest=T))
+rank6_q1=rank6_q[rank6_q$group==1, ]
+rank6_q2=rank6_q[rank6_q$group==2, ]
+rank6_q3=rank6_q[rank6_q$group==3, ]
+rank6_q4=rank6_q[rank6_q$group==4, ]
+
+sd_cutoff_r6q1=sd(rank6_q1$minscore)
+mean_cutoff_r6q1=mean(rank6_q1$minscore)
+sd_cutoff_r6q2=sd(rank6_q2$minscore)
+mean_cutoff_r6q2=mean(rank6_q2$minscore)
+sd_cutoff_r6q3=sd(rank6_q3$minscore)
+mean_cutoff_r6q3=mean(rank6_q3$minscore)
+sd_cutoff_r6q4=sd(rank6_q4$minscore)
+mean_cutoff_r6q4=mean(rank6_q4$minscore)
+
+
+sd_quality_r6q1=sd(rank6_q1$average)
+mean_quality_r6q1=mean(rank6_q1$average)
+sd_quality_r6q2=sd(rank6_q2$average)
+mean_quality_r6q2=mean(rank6_q2$average)
+sd_quality_r6q3=sd(rank6_q3$average)
+mean_quality_r6q3=mean(rank6_q3$average)
+sd_quality_r6q4=sd(rank6_q4$average)
+mean_quality_r6q4=mean(rank6_q4$average)
+
+sd_distance_r6q1=sd(rank6_q1$distance)
+mean_distance_r6q1=mean(rank6_q1$distance)
+sd_distance_r6q2=sd(rank6_q2$distance)
+mean_distance_r6q2=mean(rank6_q2$distance)
+sd_distance_r6q3=sd(rank6_q3$distance)
+mean_distance_r6q3=mean(rank6_q3$distance)
+sd_distance_r6q4=sd(rank6_q4$distance)
+mean_distance_r6q4=mean(rank6_q4$distance)
+
+mean_sd_table_quantile_1=cbind(c(sd_cutoff_r1q1, sd_cutoff_r2q1, sd_cutoff_r3q1, sd_cutoff_r4q1, sd_cutoff_r5q1, sd_cutoff_r6q1), c(mean_cutoff_r1q1, mean_cutoff_r2q1, mean_cutoff_r3q1, mean_cutoff_r4q1, mean_cutoff_r5q1, mean_cutoff_r6q1), c(sd_quality_r1q1, sd_quality_r2q1, sd_quality_r3q1, sd_quality_r4q1, sd_quality_r5q1, sd_quality_r6q1), c(mean_quality_r1q1, mean_quality_r2q1, mean_quality_r3q1, mean_quality_r4q1, mean_quality_r5q1, mean_quality_r6q1), c(sd_distance_r1q1, sd_distance_r2q1, sd_distance_r3q1, sd_distance_r4q1, sd_distance_r5q1, sd_distance_r6q1), c(mean_distance_r1q1, mean_distance_r2q1, mean_distance_r3q1, mean_distance_r4q1, mean_distance_r5q1, mean_distance_r6q1))
+
+colnames(mean_sd_table_quantile_1) = c("sd_cutoff", "mean_cutoff","sd_quality","mean_quality", "sd_distance", "mean_distance")
+rownames(mean_sd_table_quantile_1) = c("choice1", "choice2","choice3","choice4", "choice5", "choice6")
+
+mean_sd_table_quantile_2=cbind(c(sd_cutoff_r1q2, sd_cutoff_r2q2, sd_cutoff_r3q2, sd_cutoff_r4q2, sd_cutoff_r5q2, sd_cutoff_r6q2), c(mean_cutoff_r1q2, mean_cutoff_r2q2, mean_cutoff_r3q2, mean_cutoff_r4q2, mean_cutoff_r5q2, mean_cutoff_r6q2), c(sd_quality_r1q2, sd_quality_r2q2, sd_quality_r3q2, sd_quality_r4q2, sd_quality_r5q2, sd_quality_r6q2), c(mean_quality_r1q2, mean_quality_r2q2, mean_quality_r3q2, mean_quality_r4q2, mean_quality_r5q2, mean_quality_r6q2), c(sd_distance_r1q2, sd_distance_r2q2, sd_distance_r3q2, sd_distance_r4q2, sd_distance_r5q2, sd_distance_r6q2), c(mean_distance_r1q2, mean_distance_r2q2, mean_distance_r3q2, mean_distance_r4q2, mean_distance_r5q2, mean_distance_r6q2))
+
+colnames(mean_sd_table_quantile_2) = c("sd_cutoff", "mean_cutoff","sd_quality","mean_quality", "sd_distance", "mean_distance")
+rownames(mean_sd_table_quantile_2) = c("choice1", "choice2","choice3","choice4", "choice5", "choice6")
+
+mean_sd_table_quantile_3=cbind(c(sd_cutoff_r1q3, sd_cutoff_r2q3, sd_cutoff_r3q3, sd_cutoff_r4q3, sd_cutoff_r5q3, sd_cutoff_r6q3), c(mean_cutoff_r1q3, mean_cutoff_r2q3, mean_cutoff_r3q3, mean_cutoff_r4q3, mean_cutoff_r5q3, mean_cutoff_r6q3), c(sd_quality_r1q3, sd_quality_r2q3, sd_quality_r3q3, sd_quality_r4q3, sd_quality_r5q3, sd_quality_r6q3), c(mean_quality_r1q3, mean_quality_r2q3, mean_quality_r3q3, mean_quality_r4q3, mean_quality_r5q3, mean_quality_r6q3), c(sd_distance_r1q3, sd_distance_r2q3, sd_distance_r3q3, sd_distance_r4q3, sd_distance_r5q3, sd_distance_r6q3), c(mean_distance_r1q3, mean_distance_r2q3, mean_distance_r3q3, mean_distance_r4q3, mean_distance_r5q3, mean_distance_r6q3))
+
+colnames(mean_sd_table_quantile_3) = c("sd_cutoff", "mean_cutoff","sd_quality","mean_quality", "sd_distance", "mean_distance")
+rownames(mean_sd_table_quantile_3) = c("choice1", "choice2","choice3","choice4", "choice5", "choice6")
+
+mean_sd_table_quantile_4=cbind(c(sd_cutoff_r1q4, sd_cutoff_r2q4, sd_cutoff_r3q4, sd_cutoff_r4q4, sd_cutoff_r5q4, sd_cutoff_r6q4), c(mean_cutoff_r1q4, mean_cutoff_r2q4, mean_cutoff_r3q4, mean_cutoff_r4q4, mean_cutoff_r5q4, mean_cutoff_r6q4), c(sd_quality_r1q4, sd_quality_r2q4, sd_quality_r3q4, sd_quality_r4q4, sd_quality_r5q4, sd_quality_r6q4), c(mean_quality_r1q4, mean_quality_r2q4, mean_quality_r3q4, mean_quality_r4q4, mean_quality_r5q4, mean_quality_r6q4), c(sd_distance_r1q4, sd_distance_r2q4, sd_distance_r3q4, sd_distance_r4q4, sd_distance_r5q4, sd_distance_r6q4), c(mean_distance_r1q4, mean_distance_r2q4, mean_distance_r3q4, mean_distance_r4q4, mean_distance_r5q4, mean_distance_r6q4))
+
+colnames(mean_sd_table_quantile_4) = c("sd_cutoff", "mean_cutoff","sd_quality","mean_quality", "sd_distance", "mean_distance")
+rownames(mean_sd_table_quantile_4) = c("choice1", "choice2","choice3","choice4", "choice5", "choice6")
+
+mean_sd_table
+mean_sd_table_quantile_1
+mean_sd_table_quantile_2
+mean_sd_table_quantile_3
+mean_sd_table_quantile_4
+
+
+
+```
+
+
+
+
+
+
+
+
+# Exercise 5
+```{r echo=TRUE, results="show"}
+#Exercise 5 Data Creation----
+set.seed(100)
+x1=runif(10000, 1, 3)
+x2=rgamma(10000, 3, scale=2)
+x3=rbinom(10000, 1, prob=0.3)
+e=rnorm(10000, 2, 1)
+
+y=0.5+1.2*x1-0.9*x2+0.1*x3+e
+#hist(y)
+ydum=as.numeric((y>mean(y)))
+```
+# Exercise 6
+```{r echo=TRUE, results="show"}
+#Exercise 6 OLS----
+cor(y, x1)
+
+X=cbind(1, x1, x2, x3)
+b=solve(t(X)%*%X)%*%(t(X)%*%y)
+y_hat=X%*%b
+e_hat_2=(y-X%*%b)^2
+b
+Var=sum(e_hat_2)/(nrow(X)-ncol(X))*solve(t(X)%*%X)
+
+standard_error=sqrt(diag(Var))
+standard_error
+#check
+#model=lm(y~X)
+#summary(model)
+```
+| Correlation of y and X_1 is shown above.
+| Coefficient of y on x_1 is 1.24059, it's not very different from 1.2, and is statistically significant.
+| Coefficients of y on X is shown above as b.
+| Standard Error is shown above
+# Exercise 7
+```{r echo=TRUE, results="show"}
+#Exercise 7 Discrete Choice----
+
+#probit
+reg1 = glm(ydum~x1+x2+x3,family = binomial(link = "probit"))
+summary(reg1)
+
+flike = function(par,x1,x2,x3,ydum)
+{
+  xbeta           = par[1] + par[2]*x1 + par[3]*x2 + par[4]*x3
+  pr              = pnorm(xbeta)
+  #  pr              = exp(beta)/(1+exp(beta)) logit
+  pr[pr>0.999999] = 0.999999
+  pr[pr<0.000001] = 0.000001
+  like           = ydum*log(pr) + (1-ydum)*log(1-pr)
+  return(-sum(like))
+}
+
+start = runif(4)
+res  = optim(start,fn=flike,method="BFGS",control=list(trace=6,REPORT=1,maxit=1000),x1=x1,x2=x2,x3=x3,ydum=ydum,hessian=TRUE)
+
+fisher_info_probit = solve(res$hessian)       # standard formula is -res$hessian but flike is return -like
+prop_sigma_probit  = sqrt(diag(fisher_info_probit))
+#prop_sigma
+
+
+#logit
+reg2 = glm(ydum~x1+x2+x3,family = binomial(link = "logit"))
+summary(reg2)
+
+flike_logit = function(par,x1,x2,x3,ydum)
+{
+  xbeta_logit           = par[1] + par[2]*x1 + par[3]*x2 + par[4]*x3
+  pr_logit              = exp(xbeta_logit)/(1+exp(xbeta_logit))
+  pr_logit[pr_logit>0.999999] = 0.999999
+  pr_logit[pr_logit<0.000001] = 0.000001
+  like_logit           = ydum*log(pr_logit) + (1-ydum)*log(1-pr_logit)
+  return(-sum(like_logit))
+}
+
+start_logit = runif(4)
+res_logit  = optim(start_logit,fn=flike_logit,method="BFGS",control=list(trace=6,REPORT=1,maxit=1000),x1=x1,x2=x2,x3=x3,ydum=ydum,hessian=TRUE)
+
+fisher_info_logit = solve(res_logit$hessian)       # standard formula is -res$hessian but flike is return -like
+prop_sigma_logit  = sqrt(diag(fisher_info_logit))
+#prop_sigma_logit
+
+#Linear
+linear=lm(ydum~x1+x2+x3)
+summary(linear)
+
+
+
+
+est_probit = cbind(summary(reg1)$coefficients[, 1],summary(reg1)$coefficients[, 2],res$par,prop_sigma_probit)
+colnames(est_probit) = c("Probit : est","Probit :se","Probit: own : est","Probit: own :se")
+est_probit
+
+est_logit = cbind(summary(reg2)$coefficients[, 1],summary(reg2)$coefficients[, 2],res_logit$par,prop_sigma_logit)
+colnames(est_logit) = c("Logit : est","Logit :se","Logit: own : est","Logit: own :se")
+est_logit
+```
+| Table est_probit shows the point estimation and SE of porbit model and optimization results.
+| Table est_logit shows the point estimation and SE of logit model and optimization results.
+| The value of the point estimation of probit and logit model is quite different, which doesn't matter because the point estimation doesn't tell us the marginal effect.
+| The sign of the point estimation of probit and logit model is the same, which makes sense, because although we cannot interpret the magnitude, we can interpret if it's more likely or less likely for the dependent variable to be 1 in this case keeping all else constant.
+| In terms of significance, by calculating the p value, point estimation of probit and logit model is significant. In linear model, however, coefficient for x3 is not significant, coefficients for x1&x2 are significant though.
+# Exercise 8
+```{r echo=TRUE, results="show"}
+#Exercise 8 Marginal Effects----
+#Probit Model Average Marginal Effects
+probit_scalar=mean(dnorm(X%*%res$par))
+probit_margin=as.matrix(probit_scalar*res$par)
+probit_margin
+#Logit Model Average Marginal Effects
+logit_scalar=mean(dlogis(X%*%res_logit$par))
+logit_margin=as.matrix(logit_scalar*res_logit$par)
+logit_margin
+#SE
+X_all=as.data.frame(cbind(ydum,x1,x2,x3))
+x_mean=as.matrix(colMeans(X_all))
+mat=as.matrix(res$par)
+lll=length(res$par)
+xb=t(x_mean)%*%mat
+vcv=solve(res$hessian)
+gr=apply(cbind(1, x1, x2, x3), 1, function(x){
+as.numeric(as.numeric(dnorm(x %*% mat))*(diag(lll) - as.numeric(x %*% mat)*(mat %*% t(x))))
+})
+gr = matrix(apply(gr,1,mean),nrow=lll)
+Probit_marg_SE = sqrt(diag(gr %*% vcv %*% t(gr)))
+Probit_marg_SE
+
+X_all=as.data.frame(cbind(ydum,x1,x2,x3))
+x_mean=as.matrix(colMeans(X_all))
+mat=as.matrix(res_logit$par)
+lll=length(res_logit$par)
+xb=t(x_mean)%*%mat
+vcv=solve(res_logit$hessian)
+gr = apply(cbind(1,x1,x2,x3), 1, function(x){
+as.numeric(as.numeric(plogis(x %*% mat)*(1-plogis(x %*% mat)))*
+(diag(lll) - (1 - 2*as.numeric(plogis(x %*% mat)))*(mat %*% t(x))))
+})
+gr = matrix(apply(gr,1,mean),nrow=lll)
+Logit_marg_SE = sqrt(diag(gr %*% vcv %*% t(gr)))
+Logit_marg_SE
+
+```
+| Marginal effect of probit and logit model is calculated in probit_margin and logit_margin.
+| Standard error of probit and logit marginal effects is shown in Probit_marg_SE and Logit_marg_SE.
+
+
+
+
+
+
+
+
+
+
+
+
+
