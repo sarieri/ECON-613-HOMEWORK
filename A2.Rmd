@@ -1,0 +1,226 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+  code_folding: "hide"
+---
+```{r include = FALSE}
+knitr::opts_chunk$set(echo=FALSE, results="hide")
+setwd("D:/ECON613/A2")
+rm(list = ls())
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(data.table)
+library(xtable)
+library(bayesm)
+library(matrixStats)
+library(mlogit)
+library(stargazer)
+library(texreg)
+library(survival)
+library(nnet)
+library(stringr)
+```
+
+# Exercise 1
+
+```{r echo=TRUE, results="show"}
+data("margarine")
+# Average and dispersion in product characteristics.
+datchoice=margarine$choicePrice
+dataset=datchoice %>% summarise(apply(datchoice[,3:12], 2, mean), colSds(as.matrix(datchoice[,3:12])))
+
+dataset=dataset %>% 
+ mutate_if(is.numeric, round, digits=3)
+dataset$min=t(datchoice %>% summarise_at(3:12,min))
+dataset$max=t(datchoice %>% summarise_at(3:12,max))
+rownames(dataset)=c("PPk_Stk", "PBB_Stk", "PFl_Stk",  "PHse_Stk", "PGen_Stk", "PImp_Stk", "PSS_Tub",  "PPk_Tub",  "PFl_Tub",  "PHse_Tub")
+colnames(dataset)=c("Mean", "Standard_Deviation","Min","Max")
+dataset
+
+# Market share, and market share by product characteristics.
+marketshare=as.matrix(table(datchoice$choice)/nrow(datchoice))
+colnames(marketshare)=c("marketshare")
+rownames(marketshare)=c("PPk_Stk", "PBB_Stk", "PFl_Stk",  "PHse_Stk", "PGen_Stk", "PImp_Stk", "PSS_Tub",  "PPk_Tub",  "PFl_Tub",  "PHse_Tub")
+
+marketshare
+
+choice_new=t(apply(datchoice[,3:12], 1,function(x) x > apply(datchoice[,3:12],2,mean)))
+
+choicec=data.frame(cbind(datchoice[,2], choice_new))
+colnames(choicec)=c("choice",1:10)
+choicef=choicec %>% 
+  pivot_longer(!choice, names_to = "choicee", values_to = "over_avg") %>%
+  filter(choice == choicee) %>%
+  select(choice, over_avg)
+
+under=as.character(t(table(choicef))[1,]/length(datchoice$choice))
+over=as.character(t(table(choicef))[2,]/length(datchoice$choice))
+
+marketshare_price=cbind(under,over)
+colnames(marketshare_price)=c("Under_Mean_Price","Over_Mean_Price")
+rownames(marketshare_price)=c("PPk_Stk", "PBB_Stk", "PFl_Stk",  "PHse_Stk", "PGen_Stk", "PImp_Stk", "PSS_Tub",  "PPk_Tub",  "PFl_Tub",  "PHse_Tub")
+
+marketshare_price
+
+datdemos=margarine$demos
+datchoice=left_join(datchoice, datdemos, "hhid")
+choiceattribute_1=datchoice %>% group_by(choice) %>% summarize(famsize_1_2=sum(Fs3_4==0&Fs5.==0),
+                                                             famsize_3_4=sum(Fs3_4==1&Fs5.==0),
+                                                             famsize_5=sum(Fs3_4==0&Fs5.==1),
+                                                             college=sum(college==1),
+                                                             whitecollar=sum(whtcollar==1),
+                                                             retired=sum(retired==1))
+
+choiceattribute_2=datchoice %>% group_by(choice) %>% summarize(not_college=sum(college==0),
+                                                             not_whitecollar=sum(whtcollar==0),
+                                                             not_retired=sum(retired==0))
+choiceattribute=merge(choiceattribute_1, choiceattribute_2)
+choiceattribute
+```
+
+
+# Exercise 2
+
+```{r echo=TRUE, results="show"}
+set.seed(100)
+#choice matrix
+ni=nrow(datchoice)
+nj=ncol(datchoice[,3:12])
+Y=matrix(0, ni,nj)
+for(i in 1:nj){
+  for(j in 2:ni){
+    if(datchoice$choice[j]==i){
+      Y[j,i]=1
+    }
+  }
+}
+Y[1,1]=1
+#Likelihood Function
+price <- datchoice[,3:12]
+likelihood=function(x,beta) {
+    coef=exp(matrix(rep(c(0,beta[1:9]),nrow(x)),byrow=TRUE,nrow(x))+x*beta[10])
+    coef_sum=apply(coef,1,sum)
+    return(coef/coef_sum)
+}
+llike=function(y,x,beta) {
+  lprob=log(likelihood(x,beta))
+  return(-sum(Y*lprob))
+}
+#optimization
+model1=optim(function(beta) llike(y=y,x=price,b=beta),par=runif(10),method="BFGS")
+as.matrix(model1$par)
+```
+| Use conditional logit model in EX2, because price is the same for all households
+| The last coefficient here means that price and demand are negatively related--that is, higher price results in a less probability for the product to be purchased.
+| The other coefficients are the intercepts of good 2 to 10. Each means that comparing to good 1, an  individual is more likely to choose that good if the coefficient is positive, and less likely to choose that good if the coefficient is negative.
+# Exercise 3
+
+```{r echo=TRUE, results="show"}
+p=as.matrix(datchoice[,13],ncol=1)
+#Likelihood Function
+mlike=function(x,beta) {
+  coef=exp(matrix(rep(c(0,beta[1:9]),nrow(x)),byrow=TRUE,nrow(x))+t(apply(x,1,function(x)x*c(0,beta[10:18]))))
+  coef_sum=apply(coef,1,sum)
+  return(coef/coef_sum)
+}
+mllike=function(y,x,beta) {
+  lprob=log(mlike(x,beta))
+  return(-sum(Y*lprob))
+}
+#optimization
+model2=optim(function(beta) mllike(y=y,x=p,b=beta),par=runif(18),method="BFGS")
+as.matrix(model2$par)
+```
+| Use multinomial logit model in EX2, because income is not the same for households
+| The last 9 coefficients here are the effect of income(good 2 to 10), which mean that comparing to the probability of purchasing product 1, individual will more likely to choose that good if positive, and less likely to choose that good if negative. The first 9 coefficients are the intercepts(good 2 to 10).
+
+
+
+# Exercise 4
+
+```{r echo=TRUE, results="show"}
+#marginal effect for model 1(conditional logit)
+pij=likelihood(price,model1$par)
+mid=array(0,dim = c(nrow(price),10,10))
+for (i in 1:nrow(price)) {
+  diag(mid[i,,]) <- 1
+}
+llikem=array(0,dim=c(nrow(price),10,10))
+for (i in 1:nrow(price)) {
+  for (j in 1:10) {
+    for (k in 1:10) {
+      llikem[i,j,k]=pij[i,j]*(mid[i,j,k]-pij[i,k])*model1$par[10]
+    }
+  }
+}
+me_model1=apply(llikem,c(2,3),mean)
+colnames(me_model1)=c("Choice 1" , "Choice 2", "Choice 3", 
+                            "Choice 4" , "Choice 5", "Choice 6", 
+                            "Choice 7", "Choice 8", "Choice 9", 
+                            "Choice 10")
+row.names(me_model1)=c("p1", "p2" ,"p3" ,"p4" ,"p5", "p6"
+                           , "p7", "p8", "p9" , "p10")
+me_model1
+```
+| Coefficients on diagonal are negative while others are positive. This shows that people go ahead and switch to other goods if price of one good increases.
+
+```{r echo=TRUE, results="show"}
+#marginal effect for model 2(multinomial logit)
+pij_m2=mlike(p,model2$par)
+mb=c(0,model2$par[10:18])
+me_model2=array(0,dim=c(nrow(p),10))
+for (i in 1:nrow(p)) {
+  be=sum(pij_m2[i,]*mb)
+  for (j in 1:10) {
+    me_model2[i,j] <- pij_m2[i,j]*(mb[j]-be)
+  }
+}
+for (i in 1:nrow(p)) {
+  be=sum(pij_m2[i,]*mb)
+  me_model2[i,]=pij_m2[i,]*(mb-be)
+}
+me_model2=apply(me_model2, 2, mean)
+me_model2
+```
+
+# Exercise 5 IIA
+
+
+```{r echo=TRUE, results="show"}
+#beta_f
+mixlike=function(y,x,beta,prob) {
+  lprob=log(prob(x,beta))
+  return(-sum(y*lprob))
+}
+D=as.matrix(datchoice[,3:13],ncol=1)
+mixprob=function(x,beta) {
+    coef=exp(matrix(rep(c(0,beta[1:9]),nrow(x)),byrow = TRUE,nrow(x))+x[,1:10]*beta[10]+t(apply(matrix(x[,11],ncol=1),1,function(x)x*c(0,beta[11:19]))))
+    coef_sum <- apply(coef,1,sum)
+    return(coef/coef_sum)
+}
+mixmodel=optim(function(beta) mixlike(y=Y,x=D,beta=beta,prob=mixprob),par=runif(19),method="BFGS")
+mix_beta_f=as.matrix(mixmodel$par)
+mix_beta_f
+
+#beta_r
+#remove first choice
+D_new=D[,-1]
+mixlike2=function(x,beta) {
+    coef=exp(matrix(rep(c(0,beta[1:8]),nrow(x)),byrow=TRUE,nrow(x))+x[,1:9]*beta[9]+t(apply(matrix(x[,10],ncol=1),1,function(x)x*c(0,beta[10:17]))))
+    coef_sum <- apply(coef,1,sum)
+    return(coef/coef_sum)
+}
+mixmodel2=optim(function(beta) mixlike(y=Y[,-1],x=D_new,beta=beta,prob=mixlike2),par=runif(17),method="BFGS")
+mix_beta_r=as.matrix(mixmodel2$par)
+mix_beta_r
+
+#MTT
+lbf=mixlike(y=Y[,-1],x=D_new,beta=mixmodel$par[-c(1,11)],prob=mixlike2)
+lbr=mixlike(y=Y[,-1],x=D_new,beta=mixmodel2$par,prob=mixlike2)
+MTT=2*(lbf-lbr)
+t=qchisq(0.99, length(mixmodel2$par))
+MTT<t
+```
+Since MTT is greater than t, we reject the null hypothesis that IIA holds.
