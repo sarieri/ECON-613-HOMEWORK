@@ -1,0 +1,200 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+
+```{r, include}
+setwd("D:/wtk/work_qq/R/y2104401")
+require(tidyverse)
+require(ggplot2)
+require(dplyr)
+require(plm)
+require(fixest)
+```
+
+
+
+```{r}
+population <- read.csv("population.csv")
+crime_long <- read.csv("crime_long.csv")
+officers <- read.csv("officers.csv")
+
+crime_long <- crime_long %>% 
+  group_by(crime_month, district, crime_type) %>%
+  summarise(crimes=sum(crimes)) %>% tibble()
+```
+
+
+# exercise 2
+
+## Calculate total crime per month and plot the time series of crime.
+```{r}
+crime_long$crime_month <- as.Date(crime_long$crime_month)
+```
+
+
+```{r}
+crime_long %>%
+  select(crime_month, crimes) %>%
+  group_by(by=crime_month) %>% summarise(crimes.sum=sum(crimes)) %>%
+  mutate(month=by) %>%
+  ggplot(aes(month, crimes.sum)) +
+  geom_line() +
+  xlab("time") +
+  ylab("crimes")
+```
+
+
+## Merge the two datasets by districts-units and period.
+
+```{r}
+population$month <- as.Date(population$month)
+```
+
+
+
+```{r}
+population.crime <- population %>% left_join(crime_long, by=c("month"="crime_month", 
+                                          "district"="district"))
+
+population.crime$white.share = round(population.crime$tot_white/population.crime$tot_pop, 3)
+population.crime$hisp.share = round(population.crime$tot_hisp / population.crime$tot_pop, 3)
+population.crime$black.share = round(population.crime$tot_black / population.crime$tot_pop, 3)
+
+
+population.crime <- population.crime %>% drop_na() %>%
+  select(-tot_pop, -tot_white, -tot_black, -tot_hisp) %>%
+  spread(crime_type, crimes) %>% 
+  mutate(tot.crimes=drug + other + property + violent) %>%
+  select(-c("other", "drug", "period")) %>%
+  select(district, everything()) %>% arrange(district, month)
+
+```
+
+
+```{r}
+head(population.crime)
+```
+
+
+
+# Exercise 3 Panel Data: Introduction
+
+```{r}
+officers <- read.csv("officers.csv")
+officers$month <- as.Date(officers$month, format = "%m/%d/%Y")
+
+officers.crime <- officers %>% 
+  left_join(population.crime, by=c("month"="month", "unit"="district")) %>%
+  drop_na()
+head(officers.crime)
+```
+
+
+
+
+
+
+```{r}
+# ols regression
+officers.crime.3.lm <- lm(arrest~tenure+p50_inc+white.share+hisp.share+black.share+tot.crimes+property+violent - 1, officers.crime) #
+## coefficients of ols
+### tenture
+officers.crime.3.lm$coefficients[1]
+### others
+officers.crime.3.lm$coefficients[2:length(officers.crime.3.lm$coefficients)]
+
+# panel regression, pooling, used to verify the result above.
+officers.crime.3.plm <- plm(arrest~tenure+p50_inc+white.share+hisp.share+black.share+tot.crimes+property+violent - 1, officers.crime,model = "pooling", index = c("NUID", "month")) #
+
+## coefficients of plm, pooling
+
+### tenture
+officers.crime.3.plm$coefficients[1]
+### others
+officers.crime.3.plm$coefficients[2:length(officers.crime.3.lm$coefficients)]
+```
+
+# Exercise 4 Panel Data: More controls
+
+
+
+
+```{r}
+# ols
+officers.crime.4.lm <- lm(arrest~tenure+p50_inc+white.share+hisp.share+black.share+tot.crimes+property+violent +factor(month) + factor(unit) - 1, officers.crime) #
+
+oc.4.lm.f <- grep("factor", as.vector(names(officers.crime.4.lm$coefficients)))
+## coefficients of ols
+### tenure
+officers.crime.4.lm$coefficients[1]
+### Z
+officers.crime.4.lm$coefficients[2:oc.4.lm.f[1]-1]
+### district fixed effects
+district.f <- grep("factor.unit.", as.vector(names(officers.crime.4.lm$coefficients)))
+officers.crime.4.lm$coefficients[district.f]
+### year and month fixed effects
+time.f <- grep("factor.month.", as.vector(names(officers.crime.4.lm$coefficients)))
+officers.crime.4.lm$coefficients[time.f]
+```
+
+
+# Exercise 5 Panel Data: Individual xed eects
+
+
+```{r}
+# within
+officers.crime.5.plm <- plm(arrest~tenure+p50_inc+white.share+hisp.share+black.share+tot.crimes+property+violent+factor(unit), 
+                              data= officers.crime, model = "within", index =  c("NUID", "month"))
+```
+
+```{r}
+# between
+officers.crime.5.plm.b <- plm(arrest~tenure+p50_inc+white.share+hisp.share+black.share+tot.crimes+property+violent+factor(unit),
+                              data= officers.crime, model = "between", index =  c("NUID", "month"))
+```
+
+
+
+```{r}
+# first difference
+officers.crime.5.plm.d <- plm(arrest~tenure+p50_inc+white.share+hisp.share+black.share+tot.crimes+property+violent+factor(unit),
+                              data= officers.crime, model = "fd", index =  c("NUID", "month"))
+```
+
+
+```{r}
+coef.within.tenure <- as.vector(officers.crime.5.plm$coefficients[1])
+coef.between.tenure <- as.vector(officers.crime.5.plm.b$coefficients[2])
+coef.fd.tenure <- as.vector(officers.crime.5.plm.d$coefficients[2])
+pander::pandoc.table(data.frame(coef.within.tenure ,coef.between.tenure ,coef.fd.tenure))
+```
+As we known, $\beta_{within, tenture}$ is `r coef.within.tenure`,  $\beta_{between, tenture}$ is `r coef.between.tenure`,
+ $\beta_{fd, tenture}$ is `r coef.fd.tenure`. so, estimated effect by between and fd both are positive effects on dependent variable, estimated effect by within is negative. And estimated level by first difference is the largest.
+
+## b
+
+
+```{r}
+officers.crime.5.p <- feols(arrest~tenure+p50_inc+white.share+hisp.share+black.share+tot.crimes | month + unit + NUID, officers.crime, panel.id = c("NUID", "month"))
+etable(officers.crime.5.p)
+```
+
+
+```{r}
+officers.crime.5.p.coef <- fixef(officers.crime.5.p)
+summary(officers.crime.5.p.coef)
+```
+
+
+
+one-step GMM:
+
+$$
+\hat\beta_{2SLS}=[X'Z(Z'Z)^{-1}Z'X]^{-1}X'Z(Z'Z)^{-1}Z'y
+$$
+if X = Z, it is just estimator of OLS.
+
