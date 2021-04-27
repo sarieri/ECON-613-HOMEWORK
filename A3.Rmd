@@ -7,7 +7,7 @@ output: html_notebook
 
 
 ```{r, include}
-setwd("D:/wtk/work_qq/R/y2104401")
+setwd("D:/ECON613/A3")
 require(tidyverse)
 require(ggplot2)
 require(dplyr)
